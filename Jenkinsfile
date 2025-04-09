@@ -1,17 +1,23 @@
 pipeline {
     agent any
 
+    environment {
+        IMAGE_NAME = 'pradhisha/flask-ci-cd'
+        DEPLOYMENT_NAME = 'flask-deployment'
+        KUBE_CONFIG = credentials('kubeconfig-credentials') // Jenkins secret text or file credential
+    }
+
     stages {
         stage('Clone Repository') {
             steps {
-                git url:'https://github.com/Pradhisha-N/sample.git',branch:'main'
+                git url: 'https://github.com/Pradhisha-N/sample.git', branch: 'main'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build("pradhisha/flask-ci-cd")
+                    dockerImage = docker.build("${IMAGE_NAME}")
                 }
             }
         }
@@ -20,16 +26,22 @@ pipeline {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
-                        dockerImage.push("latest")
+                        dockerImage.push('latest')
                     }
                 }
             }
         }
 
-        stage('Run Container') {
+        stage('Apply Kubernetes Deployment') {
             steps {
-                sh 'docker stop flask-app || true && docker rm flask-app || true'
-                sh 'docker run -d -p 5000:5000 --name flask-app pradhisha/flask-ci-cd:latest'
+                withCredentials([file(credentialsId: 'kubeconfig-credentials', variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        export KUBECONFIG=$KUBECONFIG_FILE
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                        kubectl rollout status deployment/${DEPLOYMENT_NAME}
+                    '''
+                }
             }
         }
     }
